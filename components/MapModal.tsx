@@ -100,6 +100,15 @@ const MapModal: React.FC<MapModalProps> = ({
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
       }).addTo(mapInstanceRef.current);
+
+      // FIX: When initializing in a modal with an animation (300ms duration),
+      // we must wait for the transition to finish before recalculating size.
+      // Otherwise, Leaflet only renders the top-left chunk of the map.
+      setTimeout(() => {
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
+      }, 400);
     }
 
     if (isOpen && mapInstanceRef.current) {

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import BookingForm from './components/BookingForm';
 import RunSheetTable from './components/RunSheetTable';
@@ -7,8 +8,9 @@ import { DeliveryBooking, RunSheetStats, BookingStatus, Customer, PICKUP_PRESETS
 import { History as HistoryIcon, Users, Trash2, Edit3, Save, X, MapPin, Map as MapIcon, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle2, Filter, FilterX, Loader2, Mail, Share2, Cloud, CloudOff, RefreshCw, Copy, Check, Archive, Database, ShieldCheck, Info, Truck, LogIn, Key, HelpCircle, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-const CLOUD_API_BASE = 'https://jsonblob.com/api/jsonBlob';
-const SYNC_POLL_INTERVAL = 10000;
+// Switched to npoint.io for better CORS support on Vercel deployments
+const CLOUD_API_BASE = 'https://api.npoint.io/bins';
+const SYNC_POLL_INTERVAL = 15000; // Slightly longer interval to be respectful to the free API
 
 const App: React.FC = () => {
   const [bookings, setBookings] = useState<DeliveryBooking[]>([]);
@@ -29,7 +31,6 @@ const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(true);
   const [editingBooking, setEditingBooking] = useState<DeliveryBooking | null>(null);
-  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   
   const [isContactsExpanded, setIsContactsExpanded] = useState(true);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
@@ -44,13 +45,16 @@ const App: React.FC = () => {
       setIsSyncing(true);
       const response = await fetch(`${CLOUD_API_BASE}/${targetId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify(data),
       });
       if (!response.ok) throw new Error('Cloud push failed');
       setSyncError(null);
     } catch (err) {
-      setSyncError('Push failed. Sync key may have expired.');
+      setSyncError('Cloud sync failed. The sync key might be invalid or there is a connection issue.');
     } finally {
       setIsSyncing(false);
     }
@@ -58,11 +62,13 @@ const App: React.FC = () => {
 
   const fetchFromCloud = useCallback(async (targetId: string) => {
     try {
-      const response = await fetch(`${CLOUD_API_BASE}/${targetId}`);
+      const response = await fetch(`${CLOUD_API_BASE}/${targetId}`, {
+        headers: { 'Accept': 'application/json' }
+      });
       if (!response.ok) throw new Error('Cloud fetch failed');
       return await response.json() as DeliveryBooking[];
     } catch (err) {
-      setSyncError('Fetch failed. Check connection.');
+      setSyncError('Could not connect to the shared room. Please check your key.');
       return null;
     }
   }, []);
@@ -72,18 +78,22 @@ const App: React.FC = () => {
       setIsSyncing(true);
       const response = await fetch(CLOUD_API_BASE, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify(initialData),
       });
-      const location = response.headers.get('Location');
-      if (location) {
-        const id = location.split('/').pop() || '';
+      
+      const result = await response.json();
+      if (result && result.id) {
+        const id = result.id;
         setSyncId(id);
         localStorage.setItem('swiftRun_syncId', id);
         return id;
       }
     } catch (err) {
-      setSyncError('Failed to start sync.');
+      setSyncError('Failed to initialize cloud storage. Using local mode.');
     } finally {
       setIsSyncing(false);
     }
@@ -99,6 +109,7 @@ const App: React.FC = () => {
       if (syncId) {
         const cloudData = await fetchFromCloud(syncId);
         if (cloudData) {
+          // If cloud is empty but local has data, sync local up to cloud
           if (cloudData.length === 0 && initialBookings.length > 0) {
             pushToCloud(initialBookings, syncId);
           } else {
@@ -313,7 +324,6 @@ const App: React.FC = () => {
             {isArchiveExpanded && (
               <div className="space-y-2 px-1">
                 <p className="text-[10px] text-slate-400 italic mb-2 text-center">{localArchive.length} local records found</p>
-                {/* FIX: Properly append worksheet to workbook as book_append_sheet returns void and modifies in-place */}
                 <button 
                   onClick={() => {
                     const wb = XLSX.utils.book_new();
@@ -329,15 +339,15 @@ const App: React.FC = () => {
             )}
           </div>
 
-          {/* Help / Error Explanation Section */}
+          {/* Help Section */}
           <div className="pt-2">
             <div className="p-5 bg-blue-50 rounded-[2rem] border border-blue-100 shadow-sm">
                <div className="flex items-center gap-2 mb-3 text-blue-700">
                  <HelpCircle className="w-4 h-4" />
-                 <span className="text-[10px] font-black uppercase tracking-widest">System Status</span>
+                 <span className="text-[10px] font-black uppercase tracking-widest">System Info</span>
                </div>
                <p className="text-[10px] text-blue-800 leading-relaxed font-bold">
-                 If sync glows <span className="underline text-rose-600">red</span>, your shared key has expired. Cloud data clears after 30 days of inactivity. Use the <span className="text-indigo-600">Vault</span> for permanent local backups.
+                 Syncing via <span className="underline">npoint.io</span> for multi-device support. Use the shared key to collaborate in real-time.
                </p>
             </div>
           </div>
