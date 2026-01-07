@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+
+import React, { useState, useEffect, useMemo } from 'react';
 import Header from './components/Header';
 import BookingForm from './components/BookingForm';
 import RunSheetTable from './components/RunSheetTable';
 import StatsCard from './components/StatsCard';
 import MapModal from './components/MapModal';
 import { DeliveryBooking, RunSheetStats, BookingStatus, Customer, PICKUP_PRESETS } from './types';
-import { getSmartOptimization, OptimizationResult } from './services/geminiService';
-import { BrainCircuit, Sparkles, Loader2, RefreshCw, History as HistoryIcon, Users, Trash2, Edit3, Save, X, MapPin, Map as MapIcon, ExternalLink, ChevronDown, ChevronUp, LayoutGrid, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
+import { History as HistoryIcon, Users, Trash2, Edit3, Save, X, MapPin, Map as MapIcon, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle2, Filter, FilterX } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const App: React.FC = () => {
@@ -18,10 +18,12 @@ const App: React.FC = () => {
   const [editingBooking, setEditingBooking] = useState<DeliveryBooking | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [customerEditForm, setCustomerEditForm] = useState<Omit<Customer, 'id'>>({ name: '', address: '', contact: '' });
-  const [aiResult, setAiResult] = useState<OptimizationResult | null>(null);
-  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
   const [isContactsExpanded, setIsContactsExpanded] = useState(false);
-  const [historyTab, setHistoryTab] = useState<'All' | 'SG' | 'WB' | 'RF' | 'Other'>('All');
+  
+  // Filtering States
+  const [pickupFilter, setPickupFilter] = useState<'All' | 'SG' | 'WB' | 'RF' | 'Other'>('All');
+  const [statusFilter, setStatusFilter] = useState<'All' | BookingStatus>('All');
+  
   const [highlightedBookingId, setHighlightedBookingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
@@ -123,15 +125,6 @@ const App: React.FC = () => {
     if (editingBooking?.id === id) setEditingBooking(null);
     setSelectedIds(prev => prev.filter(selectedId => selectedId !== id));
   };
-
-  const handleAiOptimize = useCallback(async () => {
-    const active = bookings.filter(b => b.status !== 'Delivered');
-    if (active.length === 0) return;
-    setIsAiLoading(true);
-    const result = await getSmartOptimization(active);
-    setAiResult(result);
-    setIsAiLoading(false);
-  }, [bookings]);
 
   const saveCustomer = (customerData: Omit<Customer, 'id'>) => {
     if (!editingCustomerId && savedCustomers.find(c => c.name.toLowerCase() === customerData.name.toLowerCase())) return;
@@ -245,10 +238,20 @@ const App: React.FC = () => {
     return matched ? matched.id as 'SG' | 'WB' | 'RF' : 'Other';
   };
 
+  // Filter application helper
+  const applyFilters = (bookingList: DeliveryBooking[]) => {
+    return bookingList.filter(b => {
+      const pickupMatch = pickupFilter === 'All' || getBookingCategory(b) === pickupFilter;
+      const statusMatch = statusFilter === 'All' || b.status === statusFilter;
+      return pickupMatch && statusMatch;
+    });
+  };
+
   // Derived collections
-  const activeBookings = useMemo(() => 
-    bookings.filter(b => b.status !== 'Delivered'), 
-  [bookings]);
+  const activeBookings = useMemo(() => {
+    const active = bookings.filter(b => b.status !== 'Delivered');
+    return applyFilters(active);
+  }, [bookings, pickupFilter, statusFilter]);
 
   const historyBookings = useMemo(() => {
     const completed = bookings
@@ -259,15 +262,8 @@ const App: React.FC = () => {
         return dateB - dateA;
       });
 
-    if (historyTab === 'All') return completed;
-    return completed.filter(b => getBookingCategory(b) === historyTab);
-  }, [bookings, historyTab]);
-
-  const getTabCount = (id: 'All' | 'SG' | 'WB' | 'RF' | 'Other') => {
-    const completed = bookings.filter(b => b.status === 'Delivered');
-    if (id === 'All') return completed.length;
-    return completed.filter(b => getBookingCategory(b) === id).length;
-  };
+    return applyFilters(completed);
+  }, [bookings, pickupFilter, statusFilter]);
 
   const exportToExcel = () => {
     const dataToExport = historyBookings.length > 0 ? historyBookings : bookings;
@@ -308,6 +304,13 @@ const App: React.FC = () => {
     }
   };
 
+  const clearFilters = () => {
+    setPickupFilter('All');
+    setStatusFilter('All');
+  };
+
+  const isFilterActive = pickupFilter !== 'All' || statusFilter !== 'All';
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] pb-20">
       <Header />
@@ -325,12 +328,74 @@ const App: React.FC = () => {
               savedCustomers={savedCustomers}
               onSaveCustomer={saveCustomer}
             />
+
+            {/* Dynamic Filter Bar */}
+            <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="flex flex-col md:flex-row items-center gap-6 w-full md:w-auto">
+                <div className="flex items-center gap-2 text-slate-400">
+                  <Filter className="w-4 h-4" />
+                  <span className="text-xs font-bold uppercase tracking-widest">Filters</span>
+                </div>
+                
+                <div className="flex flex-col gap-1 w-full md:w-auto">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-tighter ml-1">Pickup Location</label>
+                  <div className="flex items-center bg-slate-100 p-1 rounded-xl gap-1">
+                    {(['All', 'SG', 'WB', 'RF', 'Other'] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setPickupFilter(tab)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          pickupFilter === tab 
+                            ? 'bg-white text-rose-600 shadow-sm' 
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        {tab}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 w-full md:w-auto">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-tighter ml-1">Delivery Status</label>
+                  <div className="flex items-center bg-slate-100 p-1 rounded-xl gap-1">
+                    {(['All', 'Pending', 'On Board', 'Delivered'] as const).map((status) => (
+                      <button
+                        key={status}
+                        onClick={() => setStatusFilter(status)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          statusFilter === status 
+                            ? 'bg-white text-rose-600 shadow-sm' 
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        {status}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {isFilterActive && (
+                <button 
+                  onClick={clearFilters}
+                  className="flex items-center gap-2 px-4 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all"
+                >
+                  <FilterX className="w-4 h-4" />
+                  Reset Filters
+                </button>
+              )}
+            </div>
             
             <div className="flex flex-col gap-4 relative">
               <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                   Daily Run Sheet
-                  <span className="text-xs font-normal bg-rose-100 text-rose-600 px-2 py-1 rounded-md">In Progress</span>
+                  {(statusFilter === 'All' || statusFilter === 'Pending' || statusFilter === 'On Board') && (
+                    <span className="text-xs font-normal bg-rose-100 text-rose-600 px-2 py-1 rounded-md">
+                      {statusFilter === 'All' ? 'In Progress' : statusFilter}
+                    </span>
+                  )}
                 </h2>
                 <div className="flex items-center gap-3">
                   <button 
@@ -391,118 +456,34 @@ const App: React.FC = () => {
                 onToggleSelect={toggleSelection}
                 onToggleSelectAll={toggleSelectAll}
                 title="Daily Run Sheet"
-                emptyMessage="No pending deliveries. Add some above!"
+                emptyMessage={isFilterActive ? "No matching active deliveries for these filters." : "No pending deliveries. Add some above!"}
               />
             </div>
 
             {/* History Section */}
-            <div className="flex flex-col gap-6">
-              <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            {(statusFilter === 'All' || statusFilter === 'Delivered') && (
+              <div className="flex flex-col gap-6">
                 <div className="flex items-center gap-2">
                   <HistoryIcon className="w-6 h-6 text-slate-400" />
                   <h2 className="text-2xl font-bold text-slate-800">Delivery History</h2>
                 </div>
 
-                {/* Tabbed Navigation */}
-                <div className="flex items-center bg-slate-100 p-1 rounded-xl gap-1">
-                  {(['All', 'SG', 'WB', 'RF', 'Other'] as const).map((tab) => {
-                    const count = getTabCount(tab);
-                    if (tab === 'Other' && count === 0) return null;
-                    return (
-                      <button
-                        key={tab}
-                        onClick={() => setHistoryTab(tab)}
-                        className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                          historyTab === tab 
-                            ? 'bg-white text-rose-600 shadow-sm' 
-                            : 'text-slate-500 hover:text-slate-700'
-                        }`}
-                      >
-                        {tab === 'All' ? <LayoutGrid className="w-3 h-3" /> : null}
-                        {tab}
-                        <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${historyTab === tab ? 'bg-rose-50' : 'bg-slate-200 text-slate-500'}`}>
-                          {count}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <RunSheetTable 
+                  bookings={historyBookings} 
+                  onToggleStatus={toggleStatus} 
+                  onDelete={deleteBooking} 
+                  onEdit={setEditingBooking}
+                  onPreviewMap={openSingleMapPreview}
+                  onPrintLabels={printLabels}
+                  highlightedId={highlightedBookingId}
+                  title="History"
+                  emptyMessage={isFilterActive ? "No matching history for these filters." : "No deliveries completed yet today."}
+                />
               </div>
-
-              <RunSheetTable 
-                bookings={historyBookings} 
-                onToggleStatus={toggleStatus} 
-                onDelete={deleteBooking} 
-                onEdit={setEditingBooking}
-                onPreviewMap={openSingleMapPreview}
-                onPrintLabels={printLabels}
-                highlightedId={highlightedBookingId}
-                title={`History - ${historyTab}`}
-                emptyMessage={historyTab === 'All' ? "No deliveries completed yet today." : `No completed deliveries from ${historyTab} yet.`}
-              />
-            </div>
+            )}
           </div>
 
           <div className="space-y-8">
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-6 shadow-2xl text-white relative overflow-hidden group">
-              <div className="absolute top-[-20%] right-[-10%] w-40 h-40 bg-rose-500/10 rounded-full blur-3xl group-hover:scale-125 transition-transform duration-700"></div>
-              
-              <div className="flex items-center gap-2 mb-4">
-                <BrainCircuit className="w-6 h-6 text-rose-400" />
-                <h3 className="text-lg font-bold">AI Route Assistant</h3>
-                <span className="text-[10px] bg-rose-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-widest ml-auto">Gemini 2.5</span>
-              </div>
-              
-              <p className="text-slate-300 text-sm mb-6 leading-relaxed">
-                Optimize your current run with real-time <span className="text-rose-400 font-bold">Google Maps</span> intelligence. Gemini verifies locations and traffic flow.
-              </p>
-
-              <button 
-                onClick={handleAiOptimize}
-                disabled={activeBookings.length === 0 || isAiLoading}
-                className="w-full bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed group shadow-lg shadow-rose-900/20"
-              >
-                {isAiLoading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Sparkles className="w-5 h-5 group-hover:rotate-12 transition-transform" />
-                )}
-                {isAiLoading ? 'Analyzing Route...' : 'Optimize with Google Maps'}
-              </button>
-
-              {aiResult && (
-                <div className="mt-6 p-4 bg-white/5 rounded-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold uppercase tracking-wider text-rose-400">Logistics Recommendation</span>
-                    <button onClick={() => setAiResult(null)} className="text-white/40 hover:text-white"><RefreshCw className="w-3 h-3" /></button>
-                  </div>
-                  <div className="text-sm leading-relaxed whitespace-pre-wrap text-slate-200 max-h-[300px] overflow-y-auto custom-scrollbar pr-2 mb-4">
-                    {aiResult.text}
-                  </div>
-                  
-                  {aiResult.links.length > 0 && (
-                    <div className="pt-3 border-t border-white/10">
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Maps & Web Sources</p>
-                      <div className="flex flex-wrap gap-2">
-                        {aiResult.links.map((link, idx) => (
-                          <a 
-                            key={idx} 
-                            href={link.uri} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 hover:bg-rose-500/20 text-white hover:text-rose-300 text-[11px] font-bold rounded-lg transition-all border border-white/5"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            {link.title}
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
             {/* Saved Customers List (Collapsible Contacts) */}
             <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100 transition-all duration-300 overflow-hidden">
               <button 
