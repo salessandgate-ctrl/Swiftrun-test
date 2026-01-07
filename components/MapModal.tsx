@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import { X, MapPin, Navigation, Loader2, AlertCircle, Target } from 'lucide-react';
 import { DeliveryBooking } from '../types';
@@ -30,9 +31,7 @@ const MapModal: React.FC<MapModalProps> = ({
   const markerRefs = useRef<Record<string, L.Marker>>({});
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [geocodedResults, setGeocodedResults] = useState<Record<string, GeocodedPoint>>({});
-  const [error, setError] = useState<string | null>(null);
 
-  // Helper to geocode a single address using Nominatim (OpenStreetMap)
   const fetchCoords = async (address: string): Promise<GeocodedPoint | null> => {
     try {
       const response = await fetch(
@@ -72,7 +71,6 @@ const MapModal: React.FC<MapModalProps> = ({
 
     const resolveAllCoords = async () => {
       setIsGeocoding(true);
-      setError(null);
       const newResults: Record<string, GeocodedPoint> = { ...geocodedResults };
       let foundAny = false;
 
@@ -131,7 +129,7 @@ const MapModal: React.FC<MapModalProps> = ({
             })
             .bindPopup(`
               <div class="p-1 min-w-[120px]">
-                <strong class="text-rose-600 block mb-1">${booking.customerName}</strong>
+                <strong class="text-blue-600 block mb-1">${booking.customerName}</strong>
                 <span class="text-xs text-slate-600 leading-tight block mb-2">${booking.deliveryAddress}</span>
               </div>
             `);
@@ -146,7 +144,6 @@ const MapModal: React.FC<MapModalProps> = ({
         map.fitBounds(group.getBounds().pad(0.2));
       }
 
-      // If one was pre-highlighted, center on it
       if (highlightedId && markerRefs.current[highlightedId]) {
         centerOnBooking(highlightedId);
       }
@@ -164,47 +161,42 @@ const MapModal: React.FC<MapModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-6xl h-[85vh] rounded-[3rem] shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-300 border border-white/20">
-        <div className="p-6 md:px-8 flex items-center justify-between border-b border-slate-100 bg-white">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-rose-50 rounded-2xl shadow-sm">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
+      <div className="bg-white w-full max-w-6xl h-[85vh] rounded-[3rem] shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
+        <div className="p-8 flex items-center justify-between border-b border-slate-100">
+          <div className="flex items-center gap-5">
+            <div className="p-4 bg-blue-50 rounded-2xl">
               {isGeocoding ? (
-                <Loader2 className="w-6 h-6 text-rose-600 animate-spin" />
+                <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
               ) : (
-                <MapPin className="w-6 h-6 text-rose-600" />
+                <MapPin className="w-8 h-8 text-blue-600" />
               )}
             </div>
             <div>
-              <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">{title}</h2>
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">{bookings.length} Destinations</p>
+              <h2 className="text-2xl font-black text-slate-800 tracking-tight">{title}</h2>
+              <div className="flex items-center gap-3">
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{bookings.length} Locations Mapped</p>
                 {isGeocoding && (
-                   <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-full animate-pulse">
-                     Geocoding addresses...
+                   <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-full animate-pulse uppercase tracking-widest">
+                     Resolving GPS...
                    </span>
                 )}
               </div>
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="p-2.5 hover:bg-slate-100 rounded-full transition-all text-slate-400 hover:text-slate-600 active:scale-90"
-          >
-            <X className="w-6 h-6" />
+          <button onClick={onClose} className="p-3 hover:bg-slate-100 rounded-full transition-all text-slate-400 active:scale-90">
+            <X className="w-8 h-8" />
           </button>
         </div>
 
         <div className="flex-1 relative bg-slate-50 flex flex-col md:flex-row overflow-hidden">
-          {/* Main Map Area */}
-          <div className="flex-1 relative order-2 md:order-1">
-            <div ref={mapContainerRef} className="absolute inset-0 m-4 md:m-6 rounded-[2rem] overflow-hidden shadow-2xl border border-white" />
+          <div className="flex-1 relative order-2 md:order-1 p-6">
+            <div ref={mapContainerRef} className="absolute inset-6 rounded-[2rem] overflow-hidden shadow-2xl border border-white" />
           </div>
 
-          {/* Sidebar */}
-          <div className="w-full md:w-80 bg-white border-l border-slate-100 overflow-y-auto custom-scrollbar p-6 order-1 md:order-2">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4">Route Destinations</h3>
-            <div className="space-y-3">
+          <div className="w-full md:w-96 bg-white border-l border-slate-100 overflow-y-auto custom-scrollbar p-8 order-1 md:order-2">
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Route Sequence</h3>
+            <div className="space-y-4">
               {bookings.map((booking, i) => {
                 const isResolved = booking.latitude || geocodedResults[booking.id];
                 const isHighlighted = highlightedId === booking.id;
@@ -212,26 +204,24 @@ const MapModal: React.FC<MapModalProps> = ({
                   <div 
                     key={booking.id} 
                     onClick={() => centerOnBooking(booking.id)}
-                    className={`p-4 rounded-2xl border transition-all cursor-pointer group ${
+                    className={`p-5 rounded-2xl border transition-all cursor-pointer group shadow-sm ${
                       isHighlighted 
-                        ? 'bg-rose-50 border-rose-200 ring-2 ring-rose-100' 
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-blue-100' 
                         : isResolved 
-                          ? 'bg-slate-50 border-slate-100 hover:border-rose-200' 
-                          : 'bg-amber-50 border-amber-100 opacity-60'
+                          ? 'bg-white border-slate-100 hover:border-blue-300' 
+                          : 'bg-slate-50 border-slate-100 opacity-60'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${isHighlighted ? 'bg-rose-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${isHighlighted ? 'bg-white text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
                         {i + 1}
                       </span>
                       {isResolved && (
-                        <button className={`p-1 rounded-md transition-colors ${isHighlighted ? 'bg-rose-100 text-rose-600' : 'text-slate-400 group-hover:text-rose-500'}`}>
-                          <Target className="w-3.5 h-3.5" />
-                        </button>
+                        <Target className={`w-4 h-4 ${isHighlighted ? 'text-white/80' : 'text-slate-300 group-hover:text-blue-500'}`} />
                       )}
                     </div>
-                    <p className={`text-xs font-bold truncate ${isHighlighted ? 'text-rose-700' : 'text-slate-700'}`}>{booking.customerName}</p>
-                    <p className="text-[10px] text-slate-500 mt-1 line-clamp-1 leading-tight">{booking.deliveryAddress}</p>
+                    <p className={`text-sm font-black truncate ${isHighlighted ? 'text-white' : 'text-slate-900'}`}>{booking.customerName}</p>
+                    <p className={`text-[10px] mt-1 line-clamp-2 leading-relaxed font-bold ${isHighlighted ? 'text-blue-100' : 'text-slate-500'}`}>{booking.deliveryAddress}</p>
                   </div>
                 );
               })}
@@ -239,11 +229,11 @@ const MapModal: React.FC<MapModalProps> = ({
           </div>
         </div>
 
-        <div className="px-8 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-          <p>&copy; OpenStreetMap contributors &bull; Click to highlight row in table</p>
-          <div className="flex items-center gap-4">
-             <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-600"></div> PINNED</div>
-             <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-slate-300"></div> PENDING</div>
+        <div className="px-8 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
+          <p>Coordinates provided by OpenStreetMap &bull; Map is real-time interactive</p>
+          <div className="flex items-center gap-6">
+             <div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full bg-blue-600"></div> PINNED</div>
+             <div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full bg-slate-300"></div> UNRESOLVED</div>
           </div>
         </div>
       </div>

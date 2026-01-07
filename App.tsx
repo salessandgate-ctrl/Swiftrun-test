@@ -1,17 +1,14 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import Header from './components/Header';
 import BookingForm from './components/BookingForm';
 import RunSheetTable from './components/RunSheetTable';
 import StatsCard from './components/StatsCard';
 import MapModal from './components/MapModal';
 import { DeliveryBooking, RunSheetStats, BookingStatus, Customer, PICKUP_PRESETS } from './types';
-import { History as HistoryIcon, Users, Trash2, Edit3, Save, X, MapPin, Map as MapIcon, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle2, Filter, FilterX, Loader2, Mail, Share2, Cloud, CloudOff, RefreshCw, Copy, Check, Archive, Database, ShieldCheck } from 'lucide-react';
+import { History as HistoryIcon, Users, Trash2, Edit3, Save, X, MapPin, Map as MapIcon, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle2, Filter, FilterX, Loader2, Mail, Share2, Cloud, CloudOff, RefreshCw, Copy, Check, Archive, Database, ShieldCheck, Info, Truck, LogIn, Key, HelpCircle, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-// Cloud Sync Constants
 const CLOUD_API_BASE = 'https://jsonblob.com/api/jsonBlob';
-const SYNC_POLL_INTERVAL = 10000; // 10 seconds
+const SYNC_POLL_INTERVAL = 10000;
 
 const App: React.FC = () => {
   const [bookings, setBookings] = useState<DeliveryBooking[]>([]);
@@ -19,14 +16,11 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('swiftRun_customers');
     return saved ? JSON.parse(saved) : [];
   });
-
-  // Local-only permanent archive for record keeping
   const [localArchive, setLocalArchive] = useState<DeliveryBooking[]>(() => {
     const saved = localStorage.getItem('swiftRun_permanent_archive');
     return saved ? JSON.parse(saved) : [];
   });
   
-  // Cloud Sync State
   const [syncId, setSyncId] = useState<string | null>(localStorage.getItem('swiftRun_syncId'));
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -36,21 +30,14 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [editingBooking, setEditingBooking] = useState<DeliveryBooking | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
-  const [customerEditForm, setCustomerEditForm] = useState<Omit<Customer, 'id'>>({ name: '', address: '', contact: '' });
-  const [isContactsExpanded, setIsContactsExpanded] = useState(false);
+  
+  const [isContactsExpanded, setIsContactsExpanded] = useState(true);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
   
-  const [pickupFilter, setPickupFilter] = useState<'All' | 'SG' | 'WB' | 'RF' | 'Other'>('All');
-  const [statusFilter, setStatusFilter] = useState<'All' | BookingStatus>('All');
-  
   const [highlightedBookingId, setHighlightedBookingId] = useState<string | null>(null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
   const [mapTargetBookings, setMapTargetBookings] = useState<DeliveryBooking[]>([]);
   const [mapTitle, setMapTitle] = useState("Delivery Route Map");
-
-  // --- CLOUD SYNC LOGIC ---
 
   const pushToCloud = useCallback(async (data: DeliveryBooking[], targetId: string) => {
     try {
@@ -63,8 +50,7 @@ const App: React.FC = () => {
       if (!response.ok) throw new Error('Cloud push failed');
       setSyncError(null);
     } catch (err) {
-      console.error(err);
-      setSyncError('Push failed');
+      setSyncError('Push failed. Sync key may have expired.');
     } finally {
       setIsSyncing(false);
     }
@@ -74,11 +60,9 @@ const App: React.FC = () => {
     try {
       const response = await fetch(`${CLOUD_API_BASE}/${targetId}`);
       if (!response.ok) throw new Error('Cloud fetch failed');
-      const data = await response.json();
-      return data as DeliveryBooking[];
+      return await response.json() as DeliveryBooking[];
     } catch (err) {
-      console.error(err);
-      setSyncError('Sync connection lost');
+      setSyncError('Fetch failed. Check connection.');
       return null;
     }
   }, []);
@@ -99,31 +83,23 @@ const App: React.FC = () => {
         return id;
       }
     } catch (err) {
-      setSyncError('Failed to initialize cloud storage');
+      setSyncError('Failed to start sync.');
     } finally {
       setIsSyncing(false);
     }
     return null;
   };
 
-  // Initial Data Load
   useEffect(() => {
     const loadData = async () => {
       let initialBookings: DeliveryBooking[] = [];
-      
       const saved = localStorage.getItem('swiftRun_bookings');
-      if (saved) {
-        try {
-          initialBookings = JSON.parse(saved);
-        } catch (e) { console.error(e); }
-      }
+      if (saved) initialBookings = JSON.parse(saved);
 
       if (syncId) {
         const cloudData = await fetchFromCloud(syncId);
         if (cloudData) {
-          // Safety: If cloud is empty but local has data, prevent accidental wipe
           if (cloudData.length === 0 && initialBookings.length > 0) {
-            console.warn("Cloud blob is empty. Keeping local data as source of truth.");
             pushToCloud(initialBookings, syncId);
           } else {
             initialBookings = cloudData;
@@ -136,31 +112,24 @@ const App: React.FC = () => {
       setBookings(initialBookings);
       setIsLoading(false);
     };
-
     loadData();
   }, []);
 
-  // Polling for updates
   useEffect(() => {
     if (!syncId || isLoading) return;
-
     const interval = setInterval(async () => {
       const cloudData = await fetchFromCloud(syncId);
       if (cloudData && JSON.stringify(cloudData) !== JSON.stringify(bookings)) {
         setBookings(cloudData);
       }
     }, SYNC_POLL_INTERVAL);
-
     return () => clearInterval(interval);
   }, [syncId, bookings, isLoading, fetchFromCloud]);
 
-  // Handle local changes, push, and ARCHIVE
   const handleDataChange = (newBookings: DeliveryBooking[]) => {
     setBookings(newBookings);
     localStorage.setItem('swiftRun_bookings', JSON.stringify(newBookings));
     
-    // Safety Archiving: Any booking that is "Delivered" is cloned to a local-only key
-    // This ensures long-term record keeping even if the cloud key expires.
     const deliveredItems = newBookings.filter(b => b.status === 'Delivered');
     if (deliveredItems.length > 0) {
       setLocalArchive(prev => {
@@ -172,71 +141,16 @@ const App: React.FC = () => {
       });
     }
 
-    if (syncId) {
-      pushToCloud(newBookings, syncId);
-    }
-  };
-
-  const joinRoom = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!joinKeyInput.trim()) return;
-    
-    setIsLoading(true);
-    const cloudData = await fetchFromCloud(joinKeyInput);
-    if (cloudData) {
-      setSyncId(joinKeyInput);
-      localStorage.setItem('swiftRun_syncId', joinKeyInput);
-      setBookings(cloudData);
-      setJoinKeyInput('');
-      setSyncError(null);
-    } else {
-      alert("Invalid Sync Key or Network Error.");
-    }
-    setIsLoading(false);
-  };
-
-  const disconnectSync = () => {
-    if (confirm("Disconnect cloud sync? Your local data will be preserved, but you will stop receiving updates from others.")) {
-      setSyncId(null);
-      localStorage.removeItem('swiftRun_syncId');
-    }
-  };
-
-  const copyKey = () => {
-    if (!syncId) return;
-    navigator.clipboard.writeText(syncId);
-    setCopyFeedback(true);
-    setTimeout(() => setCopyFeedback(false), 2000);
-  };
-
-  const clearLocalArchive = () => {
-    if (confirm("Are you sure you want to permanently delete your device's local record history? This cannot be undone.")) {
-      setLocalArchive([]);
-      localStorage.removeItem('swiftRun_permanent_archive');
-    }
-  };
-
-  // --- STATS & ACTIONS ---
-
-  const stats: RunSheetStats = {
-    totalDeliveries: bookings.length,
-    deliveredCount: bookings.filter(b => b.status === 'Delivered').length,
-    totalCartons: bookings.reduce((acc, b) => acc + b.cartons, 0),
+    if (syncId) pushToCloud(newBookings, syncId);
   };
 
   const addBooking = (newBooking: Omit<DeliveryBooking, 'id' | 'status'>) => {
-    const maxSeq = bookings.length > 0 ? Math.max(...bookings.map(b => b.sequence || 0)) : 0;
     const booking: DeliveryBooking = {
       ...newBooking,
       id: Math.random().toString(36).substr(2, 9),
       status: 'Pending',
-      sequence: maxSeq + 1,
-      bookedAt: new Date().toLocaleString([], { 
-        month: 'short', 
-        day: 'numeric', 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      }),
+      sequence: bookings.length + 1,
+      bookedAt: new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
     };
     handleDataChange([...bookings, booking]);
   };
@@ -257,13 +171,12 @@ const App: React.FC = () => {
   };
 
   const toggleStatus = (id: string) => {
-    const next = bookings.map(b => {
+    handleDataChange(bookings.map(b => {
       if (b.id === id) {
         let nextStatus: BookingStatus;
         let deliveredAt = b.deliveredAt;
-        if (b.status === 'Pending') {
-          nextStatus = 'On Board';
-        } else if (b.status === 'On Board') {
+        if (b.status === 'Pending') nextStatus = 'On Board';
+        else if (b.status === 'On Board') {
           nextStatus = 'Delivered';
           deliveredAt = new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         } else {
@@ -273,71 +186,7 @@ const App: React.FC = () => {
         return { ...b, status: nextStatus, deliveredAt };
       }
       return b;
-    });
-    handleDataChange(next);
-  };
-
-  const bulkMarkDelivered = () => {
-    if (selectedIds.length === 0) return;
-    const now = new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    const next: DeliveryBooking[] = bookings.map(b => {
-      if (selectedIds.includes(b.id)) {
-        return { ...b, status: 'Delivered' as BookingStatus, deliveredAt: now };
-      }
-      return b;
-    });
-    handleDataChange(next);
-    setSelectedIds([]);
-  };
-
-  const deleteBooking = (id: string) => {
-    handleDataChange(bookings.filter(b => b.id !== id));
-    if (editingBooking?.id === id) setEditingBooking(null);
-    setSelectedIds(prev => prev.filter(selectedId => selectedId !== id));
-  };
-
-  const saveCustomer = (customerData: Omit<Customer, 'id'>) => {
-    if (!editingCustomerId && savedCustomers.find(c => c.name.toLowerCase() === customerData.name.toLowerCase())) return;
-    const newCustomer: Customer = { ...customerData, id: Math.random().toString(36).substr(2, 9) };
-    const updated = [...savedCustomers, newCustomer];
-    setSavedCustomers(updated);
-    localStorage.setItem('swiftRun_customers', JSON.stringify(updated));
-  };
-
-  const startEditCustomer = (customer: Customer) => {
-    setEditingCustomerId(customer.id);
-    setCustomerEditForm({ name: customer.name, address: customer.address, contact: customer.contact });
-  };
-
-  const handleUpdateCustomer = () => {
-    if (!editingCustomerId) return;
-    const updated = savedCustomers.map(c => c.id === editingCustomerId ? { ...c, ...customerEditForm } : c);
-    setSavedCustomers(updated);
-    localStorage.setItem('swiftRun_customers', JSON.stringify(updated));
-    setEditingCustomerId(null);
-  };
-
-  const deleteCustomer = (id: string) => {
-    if (confirm('Delete this contact?')) {
-      const updated = savedCustomers.filter(c => c.id !== id);
-      setSavedCustomers(updated);
-      localStorage.setItem('swiftRun_customers', JSON.stringify(updated));
-    }
-  };
-
-  const openSingleMapPreview = (booking: DeliveryBooking) => {
-    setMapTargetBookings([booking]);
-    setMapTitle(`Map: ${booking.customerName}`);
-    setHighlightedBookingId(booking.id);
-    setIsMapModalOpen(true);
-  };
-
-  const openGlobalMapPreview = () => {
-    const active = bookings.filter(b => b.status !== 'Delivered');
-    if (active.length === 0) return;
-    setMapTargetBookings(active);
-    setMapTitle("Daily Run Map View");
-    setIsMapModalOpen(true);
+    }));
   };
 
   const printLabels = (booking: DeliveryBooking) => {
@@ -351,38 +200,38 @@ const App: React.FC = () => {
         <div class="label-page">
           <div class="label-border">
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid black; padding-bottom: 8px; margin-bottom: 12px;">
-              <div style="font-size: 28px; font-weight: 900; letter-spacing: -1px; color: #e11d48;">TOTAL TOOLS</div>
-              <div style="font-size: 32px; font-weight: 900;">${pickupDisplay}</div>
+              <div style="font-size: 26px; font-weight: 900; letter-spacing: -1.5px; color: #2563eb; line-height: 1;">TOTAL TOOLS</div>
+              <div style="font-size: 32px; font-weight: 900; background: black; color: white; padding: 2px 8px; border-radius: 4px;">${pickupDisplay}</div>
             </div>
             
             <div style="margin-bottom: 12px;">
-              <div style="font-size: 10px; text-transform: uppercase; font-weight: 900; letter-spacing: 1px; color: #64748b;">Ship To:</div>
-              <div style="font-size: 24px; font-weight: 900; margin-top: 2px;">${booking.customerName}</div>
-              <div style="font-size: 16px; font-weight: 700; margin-top: 5px; line-height: 1.2;">${booking.deliveryAddress}</div>
-              <div style="font-size: 14px; margin-top: 8px; font-weight: 600;">Contact: ${booking.contact}</div>
+              <div style="font-size: 10px; text-transform: uppercase; font-weight: 900; color: #64748b;">SHIP TO:</div>
+              <div style="font-size: 22px; font-weight: 900; margin-top: 2px; line-height: 1.1;">${booking.customerName}</div>
+              <div style="font-size: 15px; font-weight: 700; margin-top: 5px; line-height: 1.2;">${booking.deliveryAddress}</div>
+              <div style="font-size: 13px; margin-top: 6px; font-weight: 600;">Contact: ${booking.contact}</div>
             </div>
 
-            <div style="flex-grow: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; border-top: 1px dashed #cbd5e1; padding-top: 12px; margin-bottom: 12px;">
+            <div style="flex-grow: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; padding: 10px 0; margin-bottom: 12px;">
               <div>
-                <div style="font-size: 10px; font-weight: bold; text-transform: uppercase; color: #64748b;">Sales Order</div>
-                <div style="font-size: 18px; font-weight: 900;">${booking.salesOrder}</div>
+                <div style="font-size: 9px; font-weight: bold; text-transform: uppercase; color: #64748b;">Sales Order</div>
+                <div style="font-size: 16px; font-weight: 900;">${booking.salesOrder}</div>
               </div>
               <div>
-                <div style="font-size: 10px; font-weight: bold; text-transform: uppercase; color: #64748b;">Purchase Order</div>
-                <div style="font-size: 18px; font-weight: 900;">${booking.purchaseOrder || '---'}</div>
+                <div style="font-size: 9px; font-weight: bold; text-transform: uppercase; color: #64748b;">Purchase Order</div>
+                <div style="font-size: 16px; font-weight: 900;">${booking.purchaseOrder || '---'}</div>
               </div>
             </div>
 
-            <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 8px; margin-bottom: 15px;">
-              <div style="font-size: 10px; font-weight: bold; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">Delivery Instructions:</div>
-              <div style="font-size: 13px; font-weight: 600; line-height: 1.3;">${booking.deliveryInstructions || 'No specific instructions provided.'}</div>
+            <div style="background: #f1f5f9; padding: 10px; border-radius: 6px; flex-grow: 0;">
+              <div style="font-size: 9px; font-weight: bold; text-transform: uppercase; color: #475569; margin-bottom: 2px;">Instructions:</div>
+              <div style="font-size: 12px; font-weight: 700; line-height: 1.3;">${booking.deliveryInstructions || 'NO SPECIAL INSTRUCTIONS'}</div>
             </div>
 
             <div style="margin-top: auto; border-top: 3px solid black; padding-top: 10px; display: flex; justify-content: space-between; align-items: flex-end;">
-               <div style="font-size: 11px; font-weight: bold;">BOOKED: ${booking.bookedAt || 'N/A'}</div>
+               <div style="font-size: 10px; font-weight: bold;">DATE: ${new Date().toLocaleDateString()}</div>
                <div style="text-align: right;">
-                 <div style="font-size: 12px; font-weight: bold; text-transform: uppercase; color: #64748b;">Carton</div>
-                 <div style="font-size: 42px; font-weight: 900; line-height: 1;">${i} of ${booking.cartons}</div>
+                 <div style="font-size: 11px; font-weight: bold; text-transform: uppercase; color: #64748b;">Carton</div>
+                 <div style="font-size: 48px; font-weight: 900; line-height: 0.8;">${i}<span style="font-size: 20px; font-weight: 400; color: #94a3b8;">/</span>${booking.cartons}</div>
                </div>
             </div>
           </div>
@@ -393,239 +242,253 @@ const App: React.FC = () => {
     window.print();
   };
 
-  const getBookingCategory = (booking: DeliveryBooking): 'SG' | 'WB' | 'RF' | 'Other' => {
-    const matched = PICKUP_PRESETS.find(p => p.address === booking.pickupLocation);
-    return matched ? matched.id as 'SG' | 'WB' | 'RF' : 'Other';
+  const stats: RunSheetStats = {
+    totalDeliveries: bookings.length,
+    deliveredCount: bookings.filter(b => b.status === 'Delivered').length,
+    totalCartons: bookings.reduce((acc, b) => acc + b.cartons, 0),
   };
 
-  const applyFilters = (bookingList: DeliveryBooking[]) => {
-    return bookingList.filter(b => {
-      const pickupMatch = pickupFilter === 'All' || getBookingCategory(b) === pickupFilter;
-      const statusMatch = statusFilter === 'All' || b.status === statusFilter;
-      return pickupMatch && statusMatch;
-    }).sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
-  };
+  const activeBookings = useMemo(() => bookings.filter(b => b.status !== 'Delivered').sort((a,b) => (a.sequence||0)-(b.sequence||0)), [bookings]);
+  const historyBookings = useMemo(() => bookings.filter(b => b.status === 'Delivered'), [bookings]);
 
-  const activeBookings = useMemo(() => applyFilters(bookings.filter(b => b.status !== 'Delivered')), [bookings, pickupFilter, statusFilter]);
-  const historyBookings = useMemo(() => applyFilters(bookings.filter(b => b.status === 'Delivered')), [bookings, pickupFilter, statusFilter]);
-
-  const exportToExcel = (dataToExport: DeliveryBooking[]) => {
-    if (dataToExport.length === 0) {
-      alert("No data available to export.");
-      return;
-    }
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport.map(b => ({
-      'Seq': b.sequence,
-      'Status': b.status,
-      'Customer Name': b.customerName,
-      'Sales Order': b.salesOrder,
-      'Purchase Order': b.purchaseOrder,
-      'Instructions': b.deliveryInstructions,
-      'Pickup Location': b.pickupLocation,
-      'Delivery Address': b.deliveryAddress,
-      'Contact Info': b.contact,
-      'Cartons': b.cartons,
-      'Booked At': b.bookedAt || 'N/A',
-      'Delivered At': b.deliveredAt || 'N/A'
-    })));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Delivery Record");
-    XLSX.writeFile(workbook, `SwiftRun_Record_${new Date().toISOString().split('T')[0]}.xlsx`);
-  };
-
-  const handleEmailRun = () => {
-    const dataToSend = activeBookings.length > 0 ? activeBookings : historyBookings;
-    if (dataToSend.length === 0) return alert("No deliveries found to email.");
-    const dateStr = new Date().toLocaleDateString();
-    const subject = `Total Tools Run Sheet - ${dateStr}`;
-    let body = `TOTAL TOOLS - DAILY DELIVERY RUN SHEET: ${dateStr}\n========================================\n\n`;
-    dataToSend.forEach((b, idx) => {
-      body += `[${b.sequence || idx + 1}] ${b.customerName.toUpperCase()}\nStatus: ${b.status}\nAddress: ${b.deliveryAddress}\nContact: ${b.contact}\nCartons: ${b.cartons}\nSO: ${b.salesOrder} / PO: ${b.purchaseOrder || 'N/A'}\nInstructions: ${b.deliveryInstructions || 'N/A'}\n----------------------------------------\n`;
-    });
-    window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  };
-
-  const toggleSelection = (id: string) => setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-  const toggleSelectAll = (ids: string[]) => setSelectedIds(selectedIds.length === ids.length ? [] : ids);
-  const clearFilters = () => { setPickupFilter('All'); setStatusFilter('All'); };
-  const isFilterActive = pickupFilter !== 'All' || statusFilter !== 'All';
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <div className="flex flex-col items-center gap-6 animate-in fade-in duration-500">
-          <div className="p-5 bg-rose-50 rounded-[2.5rem] shadow-xl">
-             <Loader2 className="w-12 h-12 text-rose-600 animate-spin" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-2xl font-black text-slate-800 tracking-tight mb-2">SwiftRun</h1>
-            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest animate-pulse">Initializing Dashboard...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]"><Loader2 className="w-12 h-12 text-blue-600 animate-spin" /></div>;
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-20 animate-in fade-in duration-500">
-      <Header syncStatus={syncError ? 'error' : isSyncing ? 'syncing' : 'synced'} />
-      
-      <main className="max-w-7xl mx-auto px-4 md:px-6">
-        <StatsCard stats={stats} />
-        
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-12">
-            <BookingForm 
-              onAdd={addBooking} onUpdate={updateBooking} editingBooking={editingBooking}
-              onCancelEdit={() => setEditingBooking(null)} savedCustomers={savedCustomers} onSaveCustomer={saveCustomer}
-            />
+    <div className="flex min-h-screen bg-[#F8FAFC]">
+      {/* FIXED LEFT SIDEBAR */}
+      <aside className="w-80 h-screen sticky top-0 bg-white border-r border-slate-200 overflow-hidden flex flex-col shadow-2xl z-30">
+        <div className="p-8 border-b border-slate-100 bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center gap-4 text-white">
+          <div className="p-2.5 bg-white/20 backdrop-blur-md rounded-2xl shadow-inner">
+            <Truck className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black tracking-tight leading-tight">SwiftRun</h1>
+            <p className="text-[10px] font-bold text-blue-100 uppercase tracking-widest">Logistic Manager</p>
+          </div>
+        </div>
 
-            <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
-              <div className="flex flex-col md:flex-row items-center gap-6 w-full md:w-auto">
-                <div className="flex items-center gap-2 text-slate-400"><Filter className="w-4 h-4" /><span className="text-xs font-bold uppercase tracking-widest">Filters</span></div>
-                <div className="flex flex-col gap-1 w-full md:w-auto">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-tighter ml-1">Pickup Location</label>
-                  <div className="flex items-center bg-slate-100 p-1 rounded-xl gap-1">
-                    {(['All', 'SG', 'WB', 'RF', 'Other'] as const).map((tab) => (
-                      <button key={tab} onClick={() => setPickupFilter(tab)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${pickupFilter === tab ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{tab}</button>
-                    ))}
-                  </div>
+        {/* Scrollable Middle Section */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8 bg-slate-50/30">
+          {/* Saved Contacts Section */}
+          <div className="space-y-4">
+            <button onClick={()=>setIsContactsExpanded(!isContactsExpanded)} className="w-full flex items-center justify-between group p-3 rounded-2xl bg-white shadow-sm border border-slate-100 hover:border-blue-200 transition-all">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-50 rounded-xl text-blue-600">
+                  <Users className="w-4 h-4" />
                 </div>
-                <div className="flex flex-col gap-1 w-full md:w-auto">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-tighter ml-1">Delivery Status</label>
-                  <div className="flex items-center bg-slate-100 p-1 rounded-xl gap-1">
-                    {(['All', 'Pending', 'On Board', 'Delivered'] as const).map((status) => (
-                      <button key={status} onClick={() => setStatusFilter(status)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${statusFilter === status ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{status}</button>
-                    ))}
-                  </div>
-                </div>
+                <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Saved Contacts</h3>
               </div>
-              {isFilterActive && (
-                <button onClick={clearFilters} className="flex items-center gap-2 px-4 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all"><FilterX className="w-4 h-4" />Reset Filters</button>
-              )}
-            </div>
-            
-            <div className="flex flex-col gap-4 relative">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">Daily Run Sheet</h2>
-                <div className="flex items-center gap-3">
-                  <button onClick={openGlobalMapPreview} disabled={activeBookings.length === 0} className="flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-4 py-2 rounded-xl transition-all disabled:opacity-50"><MapIcon className="w-4 h-4" />View Run on Map</button>
-                  <button onClick={() => confirm('Clear all data?') && handleDataChange([])} className="text-xs text-slate-400 hover:text-rose-500 font-medium">Clear All</button>
-                </div>
-              </div>
-              
-              {selectedIds.length > 0 && (
-                <div className="sticky top-4 z-20 w-full flex justify-center animate-in slide-in-from-top-4 duration-300">
-                  <div className="bg-slate-800 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-6">
-                    <span className="text-sm font-bold">{selectedIds.length} selected</span>
-                    <button onClick={bulkMarkDelivered} className="flex items-center gap-2 text-emerald-400 hover:text-emerald-300 text-sm font-black uppercase"><CheckCircle2 className="w-4 h-4" />Mark Delivered</button>
-                    <button onClick={() => setSelectedIds([])} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
-                  </div>
-                </div>
-              )}
-
-              <RunSheetTable bookings={activeBookings} onToggleStatus={toggleStatus} onDelete={deleteBooking} onEdit={setEditingBooking} onPreviewMap={openSingleMapPreview} onPrintLabels={printLabels} onReorder={moveBooking} highlightedId={highlightedBookingId} selectedIds={selectedIds} onToggleSelect={toggleSelection} onToggleSelectAll={toggleSelectAll} emptyMessage={isFilterActive ? "No matching deliveries." : "No active deliveries."} />
-            </div>
-
-            {(statusFilter === 'All' || statusFilter === 'Delivered') && (
-              <div className="flex flex-col gap-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2"><HistoryIcon className="w-6 h-6 text-slate-400" /><h2 className="text-2xl font-bold text-slate-800">Delivery History</h2></div>
-                  <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100"><ShieldCheck className="w-3.5 h-3.5" /><span className="text-[10px] font-black uppercase tracking-widest">Locally Backed Up</span></div>
-                </div>
-                <RunSheetTable bookings={historyBookings} onToggleStatus={toggleStatus} onDelete={deleteBooking} onEdit={setEditingBooking} onPreviewMap={openSingleMapPreview} onPrintLabels={printLabels} highlightedId={highlightedBookingId} emptyMessage="No history for today." />
+              <ChevronDown className={`w-4 h-4 text-slate-300 transition-transform ${isContactsExpanded ? 'rotate-180' : ''}`} />
+            </button>
+            {isContactsExpanded && (
+              <div className="space-y-2 px-1">
+                {savedCustomers.length === 0 ? (
+                  <p className="text-[10px] text-slate-400 italic text-center py-2">No saved contacts yet.</p>
+                ) : (
+                  savedCustomers.map(c => (
+                    <div key={c.id} className="p-3 bg-white rounded-xl border border-slate-100 group relative hover:shadow-md transition-shadow">
+                      <div className="flex justify-between items-start">
+                        <p className="text-xs font-bold text-black truncate pr-4">{c.name}</p>
+                        <button onClick={()=>{ setSavedCustomers(prev=>prev.filter(x=>x.id!==c.id)); localStorage.setItem('swiftRun_customers', JSON.stringify(savedCustomers.filter(x=>x.id!==c.id))); }} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-slate-300 hover:text-rose-500"><Trash2 className="w-3 h-3" /></button>
+                      </div>
+                      <p className="text-[9px] text-slate-400 truncate">{c.address}</p>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
 
-          <div className="space-y-8">
-            {/* Cloud Sync Card */}
-            <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100">
-              <div className="flex items-center gap-2 mb-4"><div className={`p-2 rounded-xl ${syncId ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'}`}><Share2 className="w-5 h-5" /></div><h3 className="text-lg font-bold text-slate-800">Cloud Sync</h3></div>
-              {syncId ? (
-                <div className="space-y-4">
-                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Active Run Sheet Key</p>
-                    <div className="flex items-center justify-between"><code className="text-sm font-bold text-slate-700">{syncId}</code><button onClick={copyKey} className="p-2 text-slate-400 hover:text-emerald-600">{copyFeedback ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}</button></div>
-                  </div>
-                  <button onClick={disconnectSync} className="text-[11px] font-bold text-rose-600 hover:underline flex items-center gap-1"><X className="w-3 h-3" /> Disconnect shared run</button>
+          {/* Records Section */}
+          <div className="space-y-4">
+            <button onClick={()=>setIsArchiveExpanded(!isArchiveExpanded)} className="w-full flex items-center justify-between group p-3 rounded-2xl bg-white shadow-sm border border-slate-100 hover:border-indigo-200 transition-all">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-50 rounded-xl text-indigo-600">
+                  <Database className="w-4 h-4" />
                 </div>
-              ) : (
-                <form onSubmit={joinRoom} className="space-y-3"><input className="w-full bg-slate-50 px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500" placeholder="Enter Sync Key" value={joinKeyInput} onChange={(e) => setJoinKeyInput(e.target.value)} /><button type="submit" className="w-full bg-slate-800 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2"><Share2 className="w-4 h-4" /> Join Shared Run</button></form>
-              )}
-            </div>
+                <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Vault Archive</h3>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-slate-300 transition-transform ${isArchiveExpanded ? 'rotate-180' : ''}`} />
+            </button>
+            {isArchiveExpanded && (
+              <div className="space-y-2 px-1">
+                <p className="text-[10px] text-slate-400 italic mb-2 text-center">{localArchive.length} local records found</p>
+                {/* FIX: Properly append worksheet to workbook as book_append_sheet returns void and modifies in-place */}
+                <button 
+                  onClick={() => {
+                    const wb = XLSX.utils.book_new();
+                    const ws = XLSX.utils.json_to_sheet(localArchive);
+                    XLSX.utils.book_append_sheet(wb, ws, "Archive");
+                    XLSX.writeFile(wb, "RunSheet_Archive.xlsx");
+                  }} 
+                  className="w-full py-3 bg-gradient-to-r from-indigo-500 to-blue-600 text-white text-[10px] font-black rounded-xl shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 active:scale-95 transition-all"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" /> Export All History
+                </button>
+              </div>
+            )}
+          </div>
 
-            {/* Permanent Local Archive Card */}
-            <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100 transition-all duration-300">
-              <button onClick={() => setIsArchiveExpanded(!isArchiveExpanded)} className="w-full flex items-center justify-between">
-                <div className="flex items-center gap-2"><div className={`p-2 rounded-xl ${isArchiveExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-500'}`}><Database className="w-5 h-5" /></div><h3 className="text-lg font-bold text-slate-800">Permanent Records</h3></div>
-                {isArchiveExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-              </button>
-              {isArchiveExpanded && (
-                <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-2">
-                  <div className="flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">
-                    <span>{localArchive.length} Total Records</span>
-                    <button onClick={clearLocalArchive} className="text-rose-500 hover:underline">Wipe Device Memory</button>
-                  </div>
-                  <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
-                    {localArchive.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">No historical records saved on this device yet.</p>
-                    ) : (
-                      localArchive.slice(-10).reverse().map(b => (
-                        <div key={b.id + '_arch'} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
-                          <div>
-                            <p className="text-xs font-bold text-slate-700">{b.customerName}</p>
-                            <p className="text-[9px] text-slate-400">{b.deliveredAt || 'Archived'}</p>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => openSingleMapPreview(b)} className="p-1 text-slate-400 hover:text-indigo-600"><MapPin className="w-3 h-3" /></button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <button 
-                    onClick={() => exportToExcel(localArchive)}
-                    className="w-full py-2.5 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-xl border border-indigo-100 hover:bg-indigo-100 flex items-center justify-center gap-2"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" /> Export All History (Excel)
+          {/* Help / Error Explanation Section */}
+          <div className="pt-2">
+            <div className="p-5 bg-blue-50 rounded-[2rem] border border-blue-100 shadow-sm">
+               <div className="flex items-center gap-2 mb-3 text-blue-700">
+                 <HelpCircle className="w-4 h-4" />
+                 <span className="text-[10px] font-black uppercase tracking-widest">System Status</span>
+               </div>
+               <p className="text-[10px] text-blue-800 leading-relaxed font-bold">
+                 If sync glows <span className="underline text-rose-600">red</span>, your shared key has expired. Cloud data clears after 30 days of inactivity. Use the <span className="text-indigo-600">Vault</span> for permanent local backups.
+               </p>
+            </div>
+          </div>
+        </div>
+
+        {/* BOTTOM SECTION: CLOUD SYNC KEY */}
+        <div className="p-8 bg-white border-t border-slate-100 space-y-6">
+          <div className="flex items-center gap-2">
+            <Share2 className={`w-4 h-4 ${syncId ? 'text-blue-600' : 'text-slate-300'}`} />
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Live Room Key</h3>
+          </div>
+          
+          {syncId ? (
+            <div className="space-y-4">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 shadow-inner">
+                <p className="text-[9px] font-bold text-slate-400 uppercase mb-2">Room Identifier</p>
+                <div className="flex items-center justify-between">
+                  <code className="text-xs font-black text-black tracking-widest truncate mr-2">{syncId}</code>
+                  <button onClick={() => { navigator.clipboard.writeText(syncId); setCopyFeedback(true); setTimeout(()=>setCopyFeedback(false),2000); }} className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-blue-600 transition-all shadow-sm">
+                    {copyFeedback ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
                   </button>
                 </div>
-              )}
-            </div>
-
-            {/* Contacts Card */}
-            <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100 transition-all duration-300 overflow-hidden">
-              <button onClick={() => setIsContactsExpanded(!isContactsExpanded)} className="w-full flex items-center justify-between"><div className="flex items-center gap-2"><div className={`p-2 rounded-xl transition-colors ${isContactsExpanded ? 'bg-rose-600 text-white' : 'bg-rose-50 text-rose-500'}`}><Users className="w-5 h-5" /></div><h3 className="text-lg font-bold text-slate-800">Saved Contacts</h3></div>{isContactsExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}</button>
-              {isContactsExpanded && (
-                <div className="mt-6 space-y-3 animate-in fade-in slide-in-from-top-2">
-                  <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2 pb-2">
-                    {savedCustomers.map(customer => (
-                      <div key={customer.id} className={`p-4 rounded-2xl border transition-all ${editingCustomerId === customer.id ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100 group relative'}`}>
-                        {editingCustomerId === customer.id ? (
-                          <div className="space-y-3"><input className="w-full bg-white px-3 py-1.5 rounded-lg border border-rose-200 text-sm font-bold" value={customerEditForm.name} onChange={(e) => setCustomerEditForm({...customerEditForm, name: e.target.value})} /><div className="flex gap-2"><button onClick={handleUpdateCustomer} className="flex-1 bg-rose-600 text-white text-[10px] font-bold py-2 rounded-lg">Save</button><button onClick={() => setEditingCustomerId(null)} className="px-3 py-2 text-slate-400"><X className="w-3 h-3" /></button></div></div>
-                        ) : (
-                          <div className="flex justify-between items-start"><p className="text-sm font-bold text-slate-700">{customer.name}</p><div className="flex items-center gap-1 opacity-0 group-hover:opacity-100"><button onClick={() => startEditCustomer(customer)} className="p-1 text-slate-400 hover:text-amber-500"><Edit3 className="w-3 h-3" /></button><button onClick={() => deleteCustomer(customer.id)} className="p-1 text-slate-400 hover:text-rose-500"><Trash2 className="w-3 h-3" /></button></div></div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100">
-              <h3 className="text-lg font-bold text-slate-800 mb-4">Quick Actions</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => exportToExcel(bookings)} className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-rose-50 rounded-2xl transition-all border border-slate-100 group"><FileSpreadsheet className="w-6 h-6 text-rose-600 mb-1 group-hover:scale-110" /><span className="text-xs font-bold text-slate-600">Export Today</span></button>
-                <button onClick={handleEmailRun} className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-emerald-50 rounded-2xl transition-all border border-slate-100 group"><Mail className="w-6 h-6 text-emerald-600 mb-1 group-hover:scale-110" /><span className="text-xs font-bold text-slate-600">Email Run</span></button>
               </div>
+              <button onClick={()=> { if(confirm('Disconnect Shared Room? Local data remains.')) { setSyncId(null); localStorage.removeItem('swiftRun_syncId'); }}} className="w-full text-center text-[10px] font-bold text-slate-400 hover:text-rose-600 transition-colors">Terminate Live Session</button>
+            </div>
+          ) : (
+            <form onSubmit={(e)=>{ 
+              e.preventDefault(); 
+              if(joinKeyInput) {
+                fetchFromCloud(joinKeyInput).then(d=>{ 
+                  if(d){
+                    setSyncId(joinKeyInput); 
+                    setBookings(d); 
+                    localStorage.setItem('swiftRun_syncId', joinKeyInput); 
+                    setJoinKeyInput('');
+                    setSyncError(null);
+                  } else {
+                    alert('Invalid Key or Connection Error');
+                  }
+                });
+              }
+            }} className="space-y-3">
+              <div className="relative">
+                <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input 
+                  className="w-full bg-slate-50 pl-11 pr-4 py-3.5 rounded-2xl border border-slate-200 text-xs font-bold text-black outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-inner" 
+                  placeholder="Enter Key..." 
+                  value={joinKeyInput} 
+                  onChange={(e)=>setJoinKeyInput(e.target.value)} 
+                />
+              </div>
+              <button type="submit" className="w-full bg-blue-600 text-white text-xs font-black py-3.5 rounded-2xl hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-100">
+                <LogIn className="w-4 h-4" /> Sync Shared Run
+              </button>
+            </form>
+          )}
+
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${syncError ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]' : isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]'}`} />
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                {syncError ? 'System Offline' : isSyncing ? 'Syncing...' : 'Connected'}
+              </span>
+            </div>
+            {syncError && <AlertCircle className="w-3 h-3 text-rose-500" />}
+          </div>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT AREA */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-6xl mx-auto p-8 md:p-12 space-y-12">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+             <div>
+               <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none mb-3">Daily Run Dashboard</h2>
+               <div className="flex items-center gap-3">
+                 <div className="px-4 py-1.5 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-lg shadow-blue-100">Active Tasking</div>
+                 <p className="text-slate-400 font-bold text-sm">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+               </div>
+             </div>
+             <div className="flex items-center gap-3">
+               <button onClick={()=>setIsMapModalOpen(true)} className="px-10 py-4 bg-white text-blue-600 border-2 border-blue-600 rounded-[2rem] font-black flex items-center gap-2 hover:bg-blue-50 transition-all active:scale-95 shadow-sm"><MapIcon className="w-5 h-5" /> Interactive View</button>
+             </div>
+          </div>
+
+          {syncError && (
+            <div className="p-5 bg-rose-50 border-2 border-rose-100 rounded-[2rem] flex items-center gap-4 text-rose-700 animate-in slide-in-from-top-4 duration-300">
+              <div className="p-2 bg-white rounded-full">
+                <AlertCircle className="w-6 h-6 shrink-0" />
+              </div>
+              <p className="text-xs font-bold leading-tight">{syncError}</p>
+            </div>
+          )}
+
+          <StatsCard stats={stats} />
+          
+          <BookingForm 
+            onAdd={addBooking} 
+            onUpdate={updateBooking} 
+            editingBooking={editingBooking} 
+            onCancelEdit={()=>setEditingBooking(null)} 
+            savedCustomers={savedCustomers} 
+            onSaveCustomer={(c)=>{ 
+              const upd = [...savedCustomers, {...c, id: Math.random().toString(36).substr(2,9)}]; 
+              setSavedCustomers(upd); 
+              localStorage.setItem('swiftRun_customers', JSON.stringify(upd)); 
+            }} 
+          />
+
+          <div className="space-y-20 pt-10">
+            <div className="space-y-8">
+              <div className="flex items-center justify-between">
+                <h3 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-4">
+                  Current Schedule
+                  <div className="w-12 h-1 bg-blue-600 rounded-full"></div>
+                  <span className="text-slate-400 text-lg font-bold">{activeBookings.length} stops pending</span>
+                </h3>
+              </div>
+              <RunSheetTable 
+                bookings={activeBookings} 
+                onToggleStatus={toggleStatus} 
+                onDelete={(id)=>handleDataChange(bookings.filter(b=>b.id!==id))} 
+                onEdit={setEditingBooking} 
+                onPreviewMap={(b)=>{ setMapTargetBookings([b]); setIsMapModalOpen(true); }} 
+                onPrintLabels={printLabels} 
+                onReorder={moveBooking} 
+              />
+            </div>
+
+            <div className="space-y-8 pb-20">
+              <div className="flex items-center justify-between">
+                <h3 className="text-2xl font-black text-slate-300 tracking-tight">Delivery Archive</h3>
+                <div className="flex items-center gap-3 px-5 py-2 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 shadow-sm">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Permanent Storage Active</span>
+                </div>
+              </div>
+              <RunSheetTable 
+                bookings={historyBookings} 
+                onToggleStatus={toggleStatus} 
+                onDelete={(id)=>handleDataChange(bookings.filter(b=>b.id!==id))} 
+                onEdit={setEditingBooking} 
+                onPreviewMap={(b)=>{ setMapTargetBookings([b]); setIsMapModalOpen(true); }} 
+                onPrintLabels={printLabels} 
+              />
             </div>
           </div>
         </div>
       </main>
       
-      <MapModal isOpen={isMapModalOpen} onClose={() => setIsMapModalOpen(false)} bookings={mapTargetBookings} title={mapTitle} highlightedId={highlightedBookingId} onHighlight={setHighlightedBookingId} />
+      <MapModal isOpen={isMapModalOpen} onClose={()=>setIsMapModalOpen(false)} bookings={mapTargetBookings} title={mapTitle} highlightedId={highlightedBookingId} onHighlight={setHighlightedBookingId} />
     </div>
   );
 };
