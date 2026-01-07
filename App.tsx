@@ -6,7 +6,7 @@ import RunSheetTable from './components/RunSheetTable';
 import StatsCard from './components/StatsCard';
 import MapModal from './components/MapModal';
 import { DeliveryBooking, RunSheetStats, BookingStatus, Customer, PICKUP_PRESETS } from './types';
-import { History as HistoryIcon, Users, Trash2, Edit3, Save, X, MapPin, Map as MapIcon, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle2, Filter, FilterX } from 'lucide-react';
+import { History as HistoryIcon, Users, Trash2, Edit3, Save, X, MapPin, Map as MapIcon, ChevronDown, ChevronUp, FileSpreadsheet, CheckCircle2, Filter, FilterX, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const App: React.FC = () => {
@@ -15,6 +15,7 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('swiftRun_customers');
     return saved ? JSON.parse(saved) : [];
   });
+  const [isLoading, setIsLoading] = useState(true);
   const [editingBooking, setEditingBooking] = useState<DeliveryBooking | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [customerEditForm, setCustomerEditForm] = useState<Omit<Customer, 'id'>>({ name: '', address: '', contact: '' });
@@ -32,11 +33,37 @@ const App: React.FC = () => {
   const [mapTargetBookings, setMapTargetBookings] = useState<DeliveryBooking[]>([]);
   const [mapTitle, setMapTitle] = useState("Delivery Route Map");
 
+  // Initial load from localStorage
+  useEffect(() => {
+    const savedBookings = localStorage.getItem('swiftRun_bookings');
+    if (savedBookings) {
+      try {
+        const parsed = JSON.parse(savedBookings);
+        // Ensure all have sequences
+        const sanitized = parsed.map((b: any, i: number) => ({
+          ...b,
+          sequence: b.sequence ?? i + 1
+        }));
+        setBookings(sanitized);
+      } catch (e) {
+        console.error("Failed to parse bookings from storage", e);
+      }
+    }
+    const timer = setTimeout(() => setIsLoading(false), 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Sync to localStorage
+  useEffect(() => {
+    if (!isLoading) {
+      localStorage.setItem('swiftRun_bookings', JSON.stringify(bookings));
+    }
+  }, [bookings, isLoading]);
+
   useEffect(() => {
     localStorage.setItem('swiftRun_customers', JSON.stringify(savedCustomers));
   }, [savedCustomers]);
 
-  // Clear highlight after some time when modal closes
   useEffect(() => {
     if (!isMapModalOpen && highlightedBookingId) {
       const timer = setTimeout(() => setHighlightedBookingId(null), 5000);
@@ -44,7 +71,6 @@ const App: React.FC = () => {
     }
   }, [isMapModalOpen, highlightedBookingId]);
 
-  // Stats calculation
   const stats: RunSheetStats = {
     totalDeliveries: bookings.length,
     deliveredCount: bookings.filter(b => b.status === 'Delivered').length,
@@ -52,10 +78,12 @@ const App: React.FC = () => {
   };
 
   const addBooking = (newBooking: Omit<DeliveryBooking, 'id' | 'status'>) => {
+    const maxSeq = bookings.length > 0 ? Math.max(...bookings.map(b => b.sequence || 0)) : 0;
     const booking: DeliveryBooking = {
       ...newBooking,
       id: Math.random().toString(36).substr(2, 9),
       status: 'Pending',
+      sequence: newBooking.sequence || maxSeq + 1,
       bookedAt: new Date().toLocaleString([], { 
         month: 'short', 
         day: 'numeric', 
@@ -68,6 +96,22 @@ const App: React.FC = () => {
 
   const updateBooking = (id: string, updatedFields: Partial<DeliveryBooking>) => {
     setBookings(prev => prev.map(b => b.id === id ? { ...b, ...updatedFields } : b));
+  };
+
+  const moveBooking = (draggedId: string, targetId: string) => {
+    setBookings(prev => {
+      const copy = [...prev].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+      const draggedIdx = copy.findIndex(b => b.id === draggedId);
+      const targetIdx = copy.findIndex(b => b.id === targetId);
+      
+      if (draggedIdx === -1 || targetIdx === -1) return prev;
+      
+      const [removed] = copy.splice(draggedIdx, 1);
+      copy.splice(targetIdx, 0, removed);
+      
+      // Re-assign sequences based on new array order
+      return copy.map((b, i) => ({ ...b, sequence: i + 1 }));
+    });
   };
 
   const toggleStatus = (id: string) => {
@@ -103,7 +147,6 @@ const App: React.FC = () => {
 
   const bulkMarkDelivered = () => {
     if (selectedIds.length === 0) return;
-    
     const now = new Date().toLocaleString([], { 
       month: 'short', 
       day: 'numeric', 
@@ -128,7 +171,6 @@ const App: React.FC = () => {
 
   const saveCustomer = (customerData: Omit<Customer, 'id'>) => {
     if (!editingCustomerId && savedCustomers.find(c => c.name.toLowerCase() === customerData.name.toLowerCase())) return;
-    
     const newCustomer: Customer = {
       ...customerData,
       id: Math.random().toString(36).substr(2, 9),
@@ -232,22 +274,19 @@ const App: React.FC = () => {
     window.print();
   };
 
-  // Helper to categorize pickup location
   const getBookingCategory = (booking: DeliveryBooking): 'SG' | 'WB' | 'RF' | 'Other' => {
     const matched = PICKUP_PRESETS.find(p => p.address === booking.pickupLocation);
     return matched ? matched.id as 'SG' | 'WB' | 'RF' : 'Other';
   };
 
-  // Filter application helper
   const applyFilters = (bookingList: DeliveryBooking[]) => {
     return bookingList.filter(b => {
       const pickupMatch = pickupFilter === 'All' || getBookingCategory(b) === pickupFilter;
       const statusMatch = statusFilter === 'All' || b.status === statusFilter;
       return pickupMatch && statusMatch;
-    });
+    }).sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
   };
 
-  // Derived collections
   const activeBookings = useMemo(() => {
     const active = bookings.filter(b => b.status !== 'Delivered');
     return applyFilters(active);
@@ -261,7 +300,6 @@ const App: React.FC = () => {
         const dateB = b.deliveredAt ? new Date(b.deliveredAt).getTime() : 0;
         return dateB - dateA;
       });
-
     return applyFilters(completed);
   }, [bookings, pickupFilter, statusFilter]);
 
@@ -273,6 +311,7 @@ const App: React.FC = () => {
     }
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport.map(b => ({
+      'Seq': b.sequence,
       'Status': b.status,
       'Customer Name': b.customerName,
       'Sales Order': b.salesOrder,
@@ -311,8 +350,24 @@ const App: React.FC = () => {
 
   const isFilterActive = pickupFilter !== 'All' || statusFilter !== 'All';
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
+        <div className="flex flex-col items-center gap-6 animate-in fade-in duration-500">
+          <div className="p-5 bg-rose-50 rounded-[2.5rem] shadow-xl">
+             <Loader2 className="w-12 h-12 text-rose-600 animate-spin" />
+          </div>
+          <div className="text-center">
+            <h1 className="text-2xl font-black text-slate-800 tracking-tight mb-2">SwiftRun</h1>
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest animate-pulse">Initializing Dashboard...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-20">
+    <div className="min-h-screen bg-[#F8FAFC] pb-20 animate-in fade-in duration-500">
       <Header />
       
       <main className="max-w-7xl mx-auto px-4 md:px-6">
@@ -329,7 +384,6 @@ const App: React.FC = () => {
               onSaveCustomer={saveCustomer}
             />
 
-            {/* Dynamic Filter Bar */}
             <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="flex flex-col md:flex-row items-center gap-6 w-full md:w-auto">
                 <div className="flex items-center gap-2 text-slate-400">
@@ -421,7 +475,6 @@ const App: React.FC = () => {
                 </div>
               </div>
               
-              {/* Bulk Action Floating Bar */}
               {selectedIds.length > 0 && (
                 <div className="sticky top-4 z-20 w-full flex justify-center animate-in slide-in-from-top-4 duration-300">
                   <div className="bg-slate-800 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-6 border border-white/10 backdrop-blur-md">
@@ -451,6 +504,7 @@ const App: React.FC = () => {
                 onEdit={setEditingBooking}
                 onPreviewMap={openSingleMapPreview}
                 onPrintLabels={printLabels}
+                onReorder={moveBooking}
                 highlightedId={highlightedBookingId}
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelection}
@@ -460,7 +514,6 @@ const App: React.FC = () => {
               />
             </div>
 
-            {/* History Section */}
             {(statusFilter === 'All' || statusFilter === 'Delivered') && (
               <div className="flex flex-col gap-6">
                 <div className="flex items-center gap-2">
@@ -484,7 +537,6 @@ const App: React.FC = () => {
           </div>
 
           <div className="space-y-8">
-            {/* Saved Customers List (Collapsible Contacts) */}
             <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100 transition-all duration-300 overflow-hidden">
               <button 
                 onClick={() => setIsContactsExpanded(!isContactsExpanded)}
@@ -601,7 +653,6 @@ const App: React.FC = () => {
         </div>
       </main>
       
-      {/* Map Modal */}
       <MapModal 
         isOpen={isMapModalOpen} 
         onClose={() => setIsMapModalOpen(false)} 
@@ -611,7 +662,6 @@ const App: React.FC = () => {
         onHighlight={setHighlightedBookingId}
       />
 
-      {/* Visual background elements */}
       <div className="fixed bottom-[-100px] left-[-100px] w-96 h-96 bg-rose-500/5 rounded-full blur-[120px] -z-10"></div>
       <div className="fixed top-[20%] right-[-50px] w-64 h-64 bg-red-500/5 rounded-full blur-[100px] -z-10"></div>
     </div>

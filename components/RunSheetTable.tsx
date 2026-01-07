@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { CheckCircle, Clock, Trash2, MapPin, Building2, Package, Hash, User, Truck, Edit3, Eye, Calendar, Square, CheckSquare, FileText, Printer } from 'lucide-react';
+
+import React, { useEffect, useRef, useState } from 'react';
+import { CheckCircle, Clock, Trash2, MapPin, Building2, Package, Hash, User, Truck, Edit3, Eye, Calendar, Square, CheckSquare, FileText, Printer, GripVertical, ListOrdered } from 'lucide-react';
 import { DeliveryBooking, BookingStatus, PICKUP_PRESETS } from '../types';
 
 interface RunSheetTableProps {
@@ -9,6 +10,7 @@ interface RunSheetTableProps {
   onEdit: (booking: DeliveryBooking) => void;
   onPreviewMap: (booking: DeliveryBooking) => void;
   onPrintLabels?: (booking: DeliveryBooking) => void;
+  onReorder?: (draggedId: string, targetId: string) => void;
   highlightedId?: string | null;
   selectedIds?: string[];
   onToggleSelect?: (id: string) => void;
@@ -24,6 +26,7 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
   onEdit,
   onPreviewMap,
   onPrintLabels,
+  onReorder,
   highlightedId,
   selectedIds = [],
   onToggleSelect,
@@ -32,6 +35,8 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
   emptyMessage = "No deliveries booked yet"
 }) => {
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   useEffect(() => {
     if (highlightedId && rowRefs.current[highlightedId]) {
@@ -82,12 +87,35 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
 
   const isAllSelected = bookings.length > 0 && selectedIds.length === bookings.length;
 
+  // Reordering handlers
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    setDraggedId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    if (draggedId !== id) {
+      setDragOverId(id);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    if (onReorder && draggedId && draggedId !== id) {
+      onReorder(draggedId, id);
+    }
+    setDraggedId(null);
+    setDragOverId(null);
+  };
+
   return (
     <div className="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-100">
+              {onReorder && <th className="w-10 px-4"></th>}
               {onToggleSelect && (
                 <th className="pl-6 py-4 w-10">
                   <button 
@@ -98,7 +126,7 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
                   </button>
                 </th>
               )}
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status (Click to Cycle)</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Seq & Status</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Customer & Order</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Address Details</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Logistics</th>
@@ -109,20 +137,37 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
             {bookings.map((booking) => {
               const isHighlighted = highlightedId === booking.id;
               const isSelected = selectedIds.includes(booking.id);
+              const isDragging = draggedId === booking.id;
+              const isDragOver = dragOverId === booking.id;
+
               return (
                 <tr 
                   key={booking.id} 
                   ref={el => { rowRefs.current[booking.id] = el; }}
-                  className={`hover:bg-slate-50/80 transition-all duration-300 ${
+                  draggable={!!onReorder}
+                  onDragStart={(e) => handleDragStart(e, booking.id)}
+                  onDragOver={(e) => handleDragOver(e, booking.id)}
+                  onDrop={(e) => handleDrop(e, booking.id)}
+                  onDragEnd={() => { setDraggedId(null); setDragOverId(null); }}
+                  className={`transition-all duration-300 border-l-4 ${
+                    isDragOver ? 'border-l-rose-500 bg-rose-50/50 scale-[0.99] translate-x-1' : 'border-l-transparent'
+                  } ${
+                    isDragging ? 'opacity-30' : ''
+                  } ${
                     isSelected
                       ? 'bg-rose-50/40'
                       : isHighlighted 
                         ? 'bg-rose-50 ring-2 ring-inset ring-rose-500 z-10' 
                         : booking.status === 'Delivered' 
                           ? 'bg-emerald-50/30' 
-                          : ''
+                          : 'hover:bg-slate-50/80'
                   }`}
                 >
+                  {onReorder && (
+                    <td className="px-4 py-5 cursor-grab active:cursor-grabbing text-slate-300 hover:text-rose-400">
+                      <GripVertical className="w-5 h-5" />
+                    </td>
+                  )}
                   {onToggleSelect && (
                     <td className="pl-6 py-5">
                       <button 
@@ -134,23 +179,23 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
                     </td>
                   )}
                   <td className="px-6 py-5">
-                    <button 
-                      onClick={() => onToggleStatus(booking.id)}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all hover:opacity-80 active:scale-95 ${getStatusStyle(booking.status)}`}
-                    >
-                      {getStatusIcon(booking.status)}
-                      {booking.status}
-                    </button>
-                    {booking.status === 'Delivered' && booking.deliveredAt && (
-                      <div className="text-[10px] text-slate-400 mt-1 ml-1 flex items-center gap-1">
-                        <Clock className="w-2.5 h-2.5" /> Del: {booking.deliveredAt}
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-1.5 text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+                        <ListOrdered className="w-3 h-3" /> Seq: {booking.sequence || '-'}
                       </div>
-                    )}
-                    {booking.status !== 'Delivered' && booking.bookedAt && (
-                      <div className="text-[10px] text-slate-400 mt-1 ml-1 flex items-center gap-1">
-                        <Calendar className="w-2.5 h-2.5" /> Booked: {booking.bookedAt}
-                      </div>
-                    )}
+                      <button 
+                        onClick={() => onToggleStatus(booking.id)}
+                        className={`flex items-center justify-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all hover:opacity-80 active:scale-95 ${getStatusStyle(booking.status)}`}
+                      >
+                        {getStatusIcon(booking.status)}
+                        {booking.status}
+                      </button>
+                      {booking.status === 'Delivered' && booking.deliveredAt && (
+                        <div className="text-[10px] text-slate-400 ml-1 flex items-center gap-1">
+                          <Clock className="w-2.5 h-2.5" /> {booking.deliveredAt}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-5">
                     <div className="flex flex-col">

@@ -1,6 +1,6 @@
 {
   "name": "SwiftRun Delivery Manager",
-  "description": "A smart delivery booking and run sheet generator with AI-powered optimization and sequence suggestions.",
+  "description": "A streamlined delivery booking and run sheet generator with map integration and manual route planning.",
   "requestFramePermissions": [
     "geolocation"
   ]
