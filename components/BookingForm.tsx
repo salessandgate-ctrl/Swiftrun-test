@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { PlusCircle, Package, User, MapPin, Phone, Hash, Save, XCircle, Users, Search, Edit3, Building, Map, Check, FileText, ListOrdered } from 'lucide-react';
+import { PlusCircle, Package, User, MapPin, Phone, Hash, Save, XCircle, Users, Search, Edit3, Building, Map, Check, FileText, ListOrdered, StickyNote } from 'lucide-react';
 import { DeliveryBooking, Customer, PICKUP_PRESETS } from '../types';
 
 interface BookingFormProps {
@@ -28,7 +28,7 @@ const BookingForm: React.FC<BookingFormProps> = ({
     cartons: 1,
     salesOrder: '',
     purchaseOrder: '',
-    sequence: 0,
+    deliveryInstructions: '',
   });
   const [saveToContacts, setSaveToContacts] = useState(false);
   const [isManualPickup, setIsManualPickup] = useState(false);
@@ -47,7 +47,7 @@ const BookingForm: React.FC<BookingFormProps> = ({
         cartons: editingBooking.cartons,
         salesOrder: editingBooking.salesOrder,
         purchaseOrder: editingBooking.purchaseOrder || '',
-        sequence: editingBooking.sequence || 0,
+        deliveryInstructions: editingBooking.deliveryInstructions || '',
       });
       const isPreset = PICKUP_PRESETS.some(p => p.address === editingBooking.pickupLocation);
       setIsManualPickup(!isPreset);
@@ -75,7 +75,7 @@ const BookingForm: React.FC<BookingFormProps> = ({
       cartons: 1,
       salesOrder: '',
       purchaseOrder: '',
-      sequence: 0,
+      deliveryInstructions: '',
     });
     setSaveToContacts(false);
     setIsManualPickup(false);
@@ -105,15 +105,11 @@ const BookingForm: React.FC<BookingFormProps> = ({
       return;
     }
     
-    // If sequence is 0, let App.tsx auto-assign it
-    const submissionData = { ...formData };
-    if (submissionData.sequence === 0) delete (submissionData as any).sequence;
-
     if (editingBooking) {
-      onUpdate(editingBooking.id, submissionData);
+      onUpdate(editingBooking.id, formData);
       onCancelEdit();
     } else {
-      onAdd(submissionData);
+      onAdd(formData);
       if (saveToContacts) {
         onSaveCustomer({
           name: formData.customerName,
@@ -330,15 +326,26 @@ const BookingForm: React.FC<BookingFormProps> = ({
 
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-              <ListOrdered className="w-3 h-3" /> Sequence #
+              <FileText className="w-3 h-3" /> Purchase Order #
             </label>
             <input
-              type="number"
-              min="0"
+              type="text"
               className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all outline-none text-slate-700 bg-slate-50"
-              placeholder="0 for auto"
-              value={formData.sequence}
-              onChange={(e) => setFormData({ ...formData, sequence: parseInt(e.target.value) || 0 })}
+              placeholder="e.g. PO-12345 (Optional)"
+              value={formData.purchaseOrder}
+              onChange={(e) => setFormData({ ...formData, purchaseOrder: e.target.value })}
+            />
+          </div>
+
+          <div className="space-y-2 lg:col-span-3">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+              <StickyNote className="w-3 h-3" /> Delivery Instructions
+            </label>
+            <textarea
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all outline-none text-slate-700 bg-slate-50 min-h-[80px] resize-none"
+              placeholder="e.g. Gate code 1234, leave at side door..."
+              value={formData.deliveryInstructions}
+              onChange={(e) => setFormData({ ...formData, deliveryInstructions: e.target.value })}
             />
           </div>
         </div>

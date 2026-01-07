@@ -1,3 +1,4 @@
+
 export type BookingStatus = 'Pending' | 'On Board' | 'Delivered';
 
 export interface DeliveryBooking {
@@ -9,6 +10,7 @@ export interface DeliveryBooking {
   cartons: number;
   salesOrder: string;
   purchaseOrder: string;
+  deliveryInstructions?: string;
   status: BookingStatus;
   bookedAt?: string;
   deliveredAt?: string;

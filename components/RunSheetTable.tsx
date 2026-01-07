@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { CheckCircle, Clock, Trash2, MapPin, Building2, Package, Hash, User, Truck, Edit3, Eye, Calendar, Square, CheckSquare, FileText, Printer, GripVertical, ListOrdered } from 'lucide-react';
+import { CheckCircle, Clock, Trash2, MapPin, Building2, Package, Hash, User, Truck, Edit3, Eye, Calendar, Square, CheckSquare, FileText, Printer, GripVertical, ListOrdered, StickyNote } from 'lucide-react';
 import { DeliveryBooking, BookingStatus, PICKUP_PRESETS } from '../types';
 
 interface RunSheetTableProps {
@@ -87,7 +87,6 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
 
   const isAllSelected = bookings.length > 0 && selectedIds.length === bookings.length;
 
-  // Reordering handlers
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setDraggedId(id);
     e.dataTransfer.effectAllowed = 'move';
@@ -128,13 +127,13 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
               )}
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Seq & Status</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Customer & Order</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Address Details</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Address & Instructions</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Logistics</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {bookings.map((booking) => {
+            {bookings.map((booking, index) => {
               const isHighlighted = highlightedId === booking.id;
               const isSelected = selectedIds.includes(booking.id);
               const isDragging = draggedId === booking.id;
@@ -181,7 +180,7 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
                   <td className="px-6 py-5">
                     <div className="flex flex-col gap-2">
                       <div className="flex items-center gap-1.5 text-[10px] font-black text-slate-400 uppercase tracking-tighter">
-                        <ListOrdered className="w-3 h-3" /> Seq: {booking.sequence || '-'}
+                        <ListOrdered className="w-3 h-3" /> Seq: {index + 1}
                       </div>
                       <button 
                         onClick={() => onToggleStatus(booking.id)}
@@ -223,7 +222,13 @@ const RunSheetTable: React.FC<RunSheetTableProps> = ({
                         <MapPin className={`w-3.5 h-3.5 mt-0.5 transition-transform ${isHighlighted ? 'text-rose-600' : 'text-rose-400 group-hover:scale-125'}`} />
                         {booking.deliveryAddress}
                       </span>
-                      <span className="text-xs text-slate-500 flex items-center gap-1.5 mt-1">
+                      {booking.deliveryInstructions && (
+                        <span className="text-[11px] text-amber-600 font-bold flex items-start gap-1.5 mt-1 bg-amber-50 px-2 py-1 rounded-lg border border-amber-100">
+                          <StickyNote className="w-3 h-3 mt-0.5" />
+                          {booking.deliveryInstructions}
+                        </span>
+                      )}
+                      <span className="text-xs text-slate-400 flex items-center gap-1.5 mt-1 ml-1">
                         <User className="w-3.5 h-3.5" />
                         {booking.contact}
                       </span>
